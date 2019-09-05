@@ -143,6 +143,7 @@ pub const nlattr = extern struct {
 };
 
 pub const NETLINK_ROUTE: usize = 0;
+pub const RTM_NEWLINK: usize = 16;
 pub const RTM_SETLINK: usize = 19;
 pub const NLM_F_REQUEST: usize = 1;
 pub const NLM_F_ACK: usize = 4;

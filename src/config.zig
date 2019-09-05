@@ -27,7 +27,7 @@ pub const npackets = 2048;
 // Busy polling may improve performance by an order of magnitude for loaded systems, but just increases CPU consumption otherwise.
 pub const busy_poll: usize = 10 * 1000;
 
-// Maximum number of flows tracked.
+// Size of the flow ring. Must be a power of 2.
 pub const flows: usize = 4096;
 
 // How accurately to measure flow timestamps
@@ -45,6 +45,11 @@ pub const flow_timeout_age: usize = 1000 * 60;
 
 // How many milliseconds since the last packet for a flow to become a candidate for pruning.
 pub const flow_timeout_stale: usize = 1000 * 10;
+
+// How many milliseconds since the flow was complete before becoming a candidate for pruning,
+// since you might want to keep old flows around a while if they should need to be dumped later.
+// 0 means flows get pruned immediately on close.
+pub const flow_timeout_complete: usize = 1000 * 10;
 
 // Enable seccomp, ensuring that only specific syscalls/fd combinations may be executed.
 // This improves security for a (slight) cost in performance and potentially exposing bugs.

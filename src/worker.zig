@@ -7,13 +7,18 @@ const kerror = @import("kerror.zig");
 const config = @import("config.zig");
 const netif = @import("netif.zig");
 const xdp = @import("xdp.zig");
+const mm = @import("mmap.zig");
 const Flowhandler = @import("flowhandler.zig").Flowhandler;
 
 var signal_exit: u8 = 0;
 
-const page_size = 1 << config.page_log2;
 const umem_size = config.MTU * config.npackets;
-const umem_pages = ((umem_size - 1) / page_size) + 1;
+
+comptime {
+    if (@popCount(usize, config.npackets) != 1) {
+        @compileError("npackets is not a power of 2");
+    }
+}
 
 const fill_queue_descs: usize = config.npackets;
 const comp_queue_descs: usize = 8;
@@ -70,37 +75,12 @@ const Worker = struct {
         }
 
         // Allocate memory for our packets
-        const mmapflags: u64 = comptime fbrk: {
-            if (config.page_log2 == 0) {
-                @compileError("A page size of 0 doesn't make sense");
-            }
-            var flags: u64 = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_POPULATE | MAP_UNINITIALIZED;
-            if (config.page_log2 >= 16) {
-                flags |= MAP_HUGETLB | (config.page_log2 << MAP_HUGE_SHIFT);
-            }
-            break :fbrk flags;
-        };
-
-        const _umem_map: usize = try kerror.toError(mmap(null, umem_size, PROT_READ | PROT_WRITE, mmapflags, -1, 0));
-        const umem_map = @intToPtr([*]u8, _umem_map);
+        const umem_map = try mm.mmap_huge(umem_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_POPULATE | MAP_UNINITIALIZED);
         errdefer _ = munmap(umem_map, umem_size);
-
-        // mmap can return success even if it failed to allocate hugepages (yes, even though we've got MAP_POPULATE) so we need to check manually
-        if (config.page_log2 >= 16) {
-            var i: usize = 0;
-            while (i < umem_pages) : (i += 1) {
-                const memp = _umem_map + i * page_size;
-                var mincore_flag: u8 = 0;
-                _ = try kerror.toError(syscall3(SYS_mincore, memp, 1, @ptrToInt(&mincore_flag)));
-                if (mincore_flag & 0x01 == 0) {
-                    return error.OutOfHugePages;
-                }
-            }
-        }
 
         // Setup UMEM packet buffer
         const umem = xdp_umem_reg{
-            .addr = _umem_map,
+            .addr = @ptrToInt(umem_map),
             .len = umem_size,
             .chunk_size = umem_size / fill_queue_descs,
             .headroom = 0,
@@ -163,7 +143,7 @@ const Worker = struct {
                 break :ret 0;
             },
             error.Errno16_EBUSY => {
-                // Somebody hogged our queue, notify user and don't just crash with a cryptic EBUSY
+                // Somebody hogged our queue, TODO: notify user and don't just crash with a cryptic EBUSY
                 return err;
             },
             else => {
